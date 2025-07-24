@@ -12,7 +12,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	// 导入生成的绑定包（根据你的实际包名调整）
 	"github.com/test/client/task2/counter"
 )
 
@@ -39,7 +38,7 @@ func main() {
 	}
 	fmt.Printf("当前计数器值: %d\n", count.Int64())
 
-	// 2. 准备交易发送者（需要私钥）
+	// 2. 准备交易发送者
 	privateKey, err := crypto.HexToECDSA("3a5beda8d7840a5b8a68a09c358e1f75e0fc78adf4fc54d814546e05046316de")
 	if err != nil {
 		log.Fatalf("解析私钥失败: %v", err)
