@@ -1,0 +1,29 @@
+{
+  "name": "Dylan's Awesome NFT #1",
+  "description": "This is my first NFT created for the blockchain course homework. It represents my journey into the world of Web3 and decentralized applications.",
+  "image": "ipfs://QmYourImageHashHere",
+  "attributes": [
+    {
+      "trait_type": "Creator",
+      "value": "Dylan"
+    },
+    {
+      "trait_type": "Course",
+      "value": "Blockchain Development"
+    },
+    {
+      "trait_type": "Assignment",
+      "value": "Homework 2"
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Legendary"
+    },
+    {
+      "trait_type": "Creation Date",
+      "value": "2024-01-15"
+    }
+  ],
+  "external_url": "https://github.com/dylan",
+  "background_color": "000000"
+}
