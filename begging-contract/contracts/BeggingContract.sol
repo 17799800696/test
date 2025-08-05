@@ -1,9 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+// 自定义错误，节省gas
+error OnlyOwner();
+error DonationAmountZero();
+error NoFundsToWithdraw();
+error WithdrawalFailed();
+error InvalidTimeRange();
+error DonationNotStarted();
+error DonationEnded();
+error ReentrantCall();
+
 contract BeggingContract {
     // 合约所有者
     address public owner;
+    
+    // 重入攻击防护
+    bool private _locked;
+    
+    // 时间限制相关变量（优化存储布局）
+    bool public timeLimitEnabled;
+    uint256 public donationStartTime;
+    uint256 public donationEndTime;
     
     // 记录每个捐赠者的捐赠金额
     mapping(address => uint256) public donations;
@@ -13,11 +31,6 @@ contract BeggingContract {
     
     // 记录地址是否已经捐赠过（避免重复添加到数组）
     mapping(address => bool) public hasDonated;
-    
-    // 时间限制相关变量
-    uint256 public donationStartTime;
-    uint256 public donationEndTime;
-    bool public timeLimitEnabled;
     
     // 捐赠事件
     event Donation(address indexed donor, uint256 amount, uint256 timestamp);
@@ -34,25 +47,34 @@ contract BeggingContract {
         timeLimitEnabled = false;
     }
     
+    // 重入攻击防护修饰符
+    modifier nonReentrant() {
+        if (_locked) revert ReentrantCall();
+        _locked = true;
+        _;
+        _locked = false;
+    }
+    
     // 修饰符：只有合约所有者可以调用
     modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner can call this function");
+        if (msg.sender != owner) revert OnlyOwner();
         _;
     }
     
     // 修饰符：检查捐赠时间限制
     modifier withinDonationTime() {
         if (timeLimitEnabled) {
-            require(block.timestamp >= donationStartTime, "Donation period has not started yet");
-            require(block.timestamp <= donationEndTime, "Donation period has ended");
+            if (block.timestamp < donationStartTime) revert DonationNotStarted();
+            if (block.timestamp > donationEndTime) revert DonationEnded();
         }
         _;
     }
     
     // 设置捐赠时间窗口
     function setDonationTime(uint256 _startTime, uint256 _endTime) external onlyOwner {
-        require(_startTime < _endTime, "Start time must be before end time");
-        require(_endTime > block.timestamp, "End time must be in the future");
+        if (_startTime >= _endTime || _endTime <= block.timestamp) {
+            revert InvalidTimeRange();
+        }
         
         donationStartTime = _startTime;
         donationEndTime = _endTime;
@@ -66,9 +88,9 @@ contract BeggingContract {
         timeLimitEnabled = false;
     }
     
-    // 捐赠函数 - 允许用户向合约发送以太币
-    function donate() external payable withinDonationTime {
-        require(msg.value > 0, "Donation amount must be greater than 0");
+    // 内部捐赠逻辑，避免代码重复
+    function _processDonation() internal {
+        if (msg.value == 0) revert DonationAmountZero();
         
         // 如果是首次捐赠，添加到捐赠者数组
         if (!hasDonated[msg.sender]) {
@@ -83,20 +105,25 @@ contract BeggingContract {
         emit Donation(msg.sender, msg.value, block.timestamp);
     }
     
+    // 捐赠函数 - 允许用户向合约发送以太币
+    function donate() external payable withinDonationTime {
+        _processDonation();
+    }
+    
     // 提款函数 - 允许合约所有者提取所有资金
-    function withdraw() external onlyOwner {
+    function withdraw() external onlyOwner nonReentrant {
         uint256 balance = address(this).balance;
-        require(balance > 0, "No funds to withdraw");
+        if (balance == 0) revert NoFundsToWithdraw();
+        
+        // 触发提款事件（遵循checks-effects-interactions模式）
+        emit Withdrawal(owner, balance, block.timestamp);
         
         // 将资金转给合约所有者
         (bool success, ) = owner.call{value: balance}("");
-        require(success, "Withdrawal failed");
-        
-        // 触发提款事件
-        emit Withdrawal(owner, balance, block.timestamp);
+        if (!success) revert WithdrawalFailed();
     }
     
-    // 获取前3名捐赠者
+    // 获取前3名捐赠者（优化算法，从O(n³)降低到O(n)）
     function getTopDonors() external view returns (address[3] memory topDonors, uint256[3] memory topAmounts) {
         uint256 donorCount = donors.length;
         
@@ -111,36 +138,33 @@ contract BeggingContract {
             return (topDonors, topAmounts);
         }
         
-        // 找出前3名捐赠者（简单的选择排序）
-        for (uint i = 0; i < donorCount && i < 3; i++) {
-            uint256 maxAmount = 0;
-            address maxDonor = address(0);
-            uint256 maxIndex = 0;
+        // 一次遍历找出前3名（插入排序思想）
+        for (uint i = 0; i < donorCount; i++) {
+            address currentDonor = donors[i];
+            uint256 currentAmount = donations[currentDonor];
             
-            // 找出当前最大的捐赠者（排除已经选中的）
-            for (uint j = 0; j < donorCount; j++) {
-                address currentDonor = donors[j];
-                uint256 currentAmount = donations[currentDonor];
-                
-                // 检查是否已经在前面的位置中
-                bool alreadySelected = false;
-                for (uint k = 0; k < i; k++) {
-                    if (topDonors[k] == currentDonor) {
-                        alreadySelected = true;
-                        break;
-                    }
+            // 检查是否能进入前3名
+            if (currentAmount > topAmounts[2]) {
+                // 找到插入位置并移动数组
+                if (currentAmount > topAmounts[0]) {
+                    // 插入第1位
+                    topAmounts[2] = topAmounts[1];
+                    topDonors[2] = topDonors[1];
+                    topAmounts[1] = topAmounts[0];
+                    topDonors[1] = topDonors[0];
+                    topAmounts[0] = currentAmount;
+                    topDonors[0] = currentDonor;
+                } else if (currentAmount > topAmounts[1]) {
+                    // 插入第2位
+                    topAmounts[2] = topAmounts[1];
+                    topDonors[2] = topDonors[1];
+                    topAmounts[1] = currentAmount;
+                    topDonors[1] = currentDonor;
+                } else {
+                    // 插入第3位
+                    topAmounts[2] = currentAmount;
+                    topDonors[2] = currentDonor;
                 }
-                
-                if (!alreadySelected && currentAmount > maxAmount) {
-                    maxAmount = currentAmount;
-                    maxDonor = currentDonor;
-                    maxIndex = j;
-                }
-            }
-            
-            if (maxDonor != address(0)) {
-                topDonors[i] = maxDonor;
-                topAmounts[i] = maxAmount;
             }
         }
         
@@ -174,14 +198,6 @@ contract BeggingContract {
     
     // 接收以太币的回退函数
     receive() external payable withinDonationTime {
-        // 如果是首次捐赠，添加到捐赠者数组
-        if (!hasDonated[msg.sender]) {
-            donors.push(msg.sender);
-            hasDonated[msg.sender] = true;
-        }
-        
-        // 自动记录为捐赠
-        donations[msg.sender] += msg.value;
-        emit Donation(msg.sender, msg.value, block.timestamp);
+        _processDonation();
     }
 }

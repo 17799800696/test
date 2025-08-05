@@ -74,7 +74,7 @@ describe("BeggingContract", function () {
     it("应该拒绝 0 金额的捐赠", async function () {
       await expect(
         beggingContract.connect(donor1).donate({ value: 0 })
-      ).to.be.revertedWith("Donation amount must be greater than 0");
+      ).to.be.revertedWithCustomError(beggingContract, "DonationAmountZero");
     });
 
     it("应该正确记录捐赠者到数组中", async function () {
@@ -116,7 +116,7 @@ describe("BeggingContract", function () {
     it("非所有者不应该能够提取资金", async function () {
       await expect(
         beggingContract.connect(donor1).withdraw()
-      ).to.be.revertedWith("Only owner can call this function");
+      ).to.be.revertedWithCustomError(beggingContract, "OnlyOwner");
     });
 
     it("余额为 0 时不应该能够提取", async function () {
@@ -126,7 +126,7 @@ describe("BeggingContract", function () {
       // 再次尝试提取应该失败
       await expect(
         beggingContract.connect(owner).withdraw()
-      ).to.be.revertedWith("No funds to withdraw");
+      ).to.be.revertedWithCustomError(beggingContract, "NoFundsToWithdraw");
     });
   });
 
@@ -241,7 +241,7 @@ describe("BeggingContract", function () {
 
       await expect(
         beggingContract.connect(donor1).setDonationTime(startTime, endTime)
-      ).to.be.revertedWith("Only owner can call this function");
+      ).to.be.revertedWithCustomError(beggingContract, "OnlyOwner");
     });
 
     it("应该拒绝无效的时间设置", async function () {
@@ -250,12 +250,12 @@ describe("BeggingContract", function () {
       // 开始时间晚于结束时间
       await expect(
         beggingContract.connect(owner).setDonationTime(currentTime + 3600, currentTime + 100)
-      ).to.be.revertedWith("Start time must be before end time");
+      ).to.be.revertedWithCustomError(beggingContract, "InvalidTimeRange");
       
       // 结束时间在过去
       await expect(
         beggingContract.connect(owner).setDonationTime(currentTime - 3600, currentTime - 100)
-      ).to.be.revertedWith("End time must be in the future");
+      ).to.be.revertedWithCustomError(beggingContract, "InvalidTimeRange");
     });
 
     it("在时间窗口外应该拒绝捐赠", async function () {
@@ -268,7 +268,7 @@ describe("BeggingContract", function () {
       // 在开始时间之前捐赠应该失败
       await expect(
         beggingContract.connect(donor1).donate({ value: ethers.parseEther("1.0") })
-      ).to.be.revertedWith("Donation period has not started yet");
+      ).to.be.revertedWithCustomError(beggingContract, "DonationNotStarted");
     });
 
     it("所有者应该能够禁用时间限制", async function () {
@@ -304,7 +304,7 @@ describe("BeggingContract", function () {
           to: await beggingContract.getAddress(),
           value: ethers.parseEther("1.0")
         })
-      ).to.be.revertedWith("Donation period has not started yet");
+      ).to.be.revertedWithCustomError(beggingContract, "DonationNotStarted");
     });
   });
 
