@@ -59,8 +59,9 @@ sequenceDiagram
     User->>Factory: 设置默认配置(价格预言机、手续费等)
 
     Note over User,Token: 2. 创建拍卖合约实例
-    User->>Factory: createAuctionContract(name, description)
-    Factory->>Auction: 创建新的拍卖合约实例
+    User->>Factory: createAuctionContract(name, description, ethUsdPriceFeed, feeRecipient)
+    Factory->>Auction: new NFTAuction(ethUsdPriceFeed, feeRecipient)
+    Factory->>Auction: transferOwnership(msg.sender)
     Factory->>Factory: 注册合约到注册表
     Factory-->>User: 返回合约地址和ID
 
@@ -70,16 +71,13 @@ sequenceDiagram
     User->>NFT: approve(auctionContract, tokenId)
 
     Note over User,Token: 4. 创建拍卖
-    User->>Auction: createAuction(nftContract, tokenId, startPrice, reservePrice, duration)
+    User->>Auction: createAuction(nftContract, tokenId, startPriceUSD, reservePriceUSD, duration, bidIncrementUSD)
     Auction->>NFT: transferFrom(seller, auction, tokenId)
     Auction->>Auction: 创建拍卖记录
     Auction-->>User: emit AuctionCreated事件
 
     Note over User,Token: 5. 出价阶段
     loop 多个竞拍者出价
-        User->>Oracle: 获取当前价格
-        Oracle-->>User: 返回ETH/USD或Token/USD价格
-        
         alt ETH出价
             User->>Auction: bidWithETH(auctionId) {value: ethAmount}
             Auction->>Oracle: 查询ETH/USD价格
@@ -87,7 +85,7 @@ sequenceDiagram
             Auction->>Auction: 计算USD等值金额
         else ERC20代币出价
             User->>Token: approve(auction, tokenAmount)
-            User->>Auction: bidWithToken(auctionId, token, amount)
+            User->>Auction: bidWithERC20(auctionId, token, amount)
             Auction->>Oracle: 查询Token/USD价格
             Oracle-->>Auction: 返回价格数据
             Auction->>Token: transferFrom(bidder, auction, amount)
@@ -108,17 +106,17 @@ sequenceDiagram
         alt 达到保留价
             Auction->>Auction: 计算平台手续费
             Auction->>User: 转账给卖家(扣除手续费)
-            Auction->>Factory: 转账手续费给平台
+            Auction->>User: 转账手续费给feeRecipient
             Auction->>NFT: transferFrom(auction, winner, tokenId)
             Auction-->>User: emit AuctionEnded事件
         else 未达到保留价
             Auction->>User: 退还最高出价
             Auction->>NFT: transferFrom(auction, seller, tokenId)
-            Auction-->>User: emit AuctionCancelled事件
+            Auction-->>User: emit AuctionEnded事件(highestBidder=address(0))
         end
-    else 卖家主动取消
+    else 卖家主动取消(仅无出价时)
         User->>Auction: cancelAuction(auctionId)
-        Auction->>User: 退还当前最高出价
+        Auction->>Auction: 检查无出价条件
         Auction->>NFT: transferFrom(auction, seller, tokenId)
         Auction-->>User: emit AuctionCancelled事件
     end
