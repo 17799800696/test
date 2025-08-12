@@ -1,0 +1,22 @@
+{
+  "network": "sepolia",
+  "deployer": "0xB73fB1c8F42A3ca9E28C71C3A1B512A83C2377A6",
+  "timestamp": "2025-08-11T15:56:17.376Z",
+  "contracts": {
+    "ethUsdPriceFeed": "0x8d7F08CEC24fE001042BCfa6ac2B3bD99e67F4FC",
+    "auctionNFT": "0x38699aC9770CeB94831551486339605BbcbB0DE7",
+    "erc20UsdPriceFeed": "0x207674e0BFC6089025Ceaf0517dB024A4f8d70Eb",
+    "mockUSDC": "0x07afe5De3d8004c21f548B2F4aB4Ea54af037A2B",
+    "nftAuction": "0xbBD732a50b645532b1b685410627feD9d069d78a",
+    "auctionFactory": "0x01c540A58116dF10F078c2d06DCAc28d486c6fC4",
+    "upgradeableAuction": "0x3a72c53becc8fd46f82B21Df062c19546Db37CE6",
+    "upgradeableAuctionImpl": "0x9219c95a2eB7c4bDf6790c6560E49bd9ddf5FA79"
+  },
+  "config": {
+    "ethUsdPriceFeed": "0x694AA1769357215DE4FAC081bf1f309aDC325306",
+    "usdcUsdPriceFeed": "0xA2F78ab2355fe2f984D808B5CeE7FD0A93D5270E",
+    "feeRecipient": "0xB73fB1c8F42A3ca9E28C71C3A1B512A83C2377A6",
+    "platformFeeRate": 250
+  },
+  "gasUsed": {}
+}
