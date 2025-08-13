@@ -53,8 +53,8 @@ contract AuctionNFT is ERC721, ERC721URIStorage, Ownable {
         returns (uint256[] memory) 
     {
         uint256[] memory tokenIds = new uint256[](tokenURIs.length);
-        
-        for (uint256 i = 0; i < tokenURIs.length; i++) {
+        uint256 tokenURIsLen = tokenURIs.length;
+        for (uint256 i = 0; i <tokenURIsLen; i++) {
             tokenIds[i] = mintNFT(to, tokenURIs[i]);
         }
         

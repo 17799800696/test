@@ -2,13 +2,15 @@
   "name": "hardhat-project",
   "scripts": {
     "test": "npx hardhat test",
+    "test:coverage": "npx hardhat coverage",
     "compile": "npx hardhat compile",
     "deploy": "npx hardhat run scripts/deploy.js",
     "interact": "npx hardhat run scripts/interact.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^6.1.0",
-    "hardhat": "^2.26.2"
+    "hardhat": "^2.26.2",
+    "solidity-coverage": "^0.8.16"
   },
   "dependencies": {
     "@chainlink/contracts": "^1.4.0",
