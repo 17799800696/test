@@ -1,0 +1,46 @@
+{
+  "network": {
+    "name": "hardhat",
+    "chainId": "1337"
+  },
+  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "timestamp": "2025-08-17T12:15:04.861Z",
+  "blockNumber": 7,
+  "contracts": {
+    "MetaNodeToken": {
+      "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+      "name": "MetaNode Token",
+      "symbol": "MNT",
+      "initialSupply": "10000000.0"
+    },
+    "StakeContract": {
+      "address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "rewardPerBlock": "1.0",
+      "startBlock": 0
+    },
+    "MockERC20": {
+      "address": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+      "name": "Mock Stake Token",
+      "symbol": "MST",
+      "supply": "1000000"
+    }
+  },
+  "pools": [
+    {
+      "id": 0,
+      "name": "ETH Pool",
+      "stTokenAddress": "0x0000000000000000000000000000000000000000",
+      "weight": 100,
+      "minDepositAmount": "0.01",
+      "unstakeLockedBlocks": 100
+    },
+    {
+      "id": 1,
+      "name": "Mock Token Pool",
+      "stTokenAddress": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+      "weight": 200,
+      "minDepositAmount": "10",
+      "unstakeLockedBlocks": 200
+    }
+  ]
+}

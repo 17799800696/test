@@ -1,0 +1,33 @@
+{
+  "name": "stake-contract",
+  "version": "1.0.0",
+  "description": "A blockchain-based staking system with multiple token support",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx hardhat test",
+    "compile": "npx hardhat compile",
+    "deploy": "npx hardhat run scripts/deploy.js",
+    "deploy:sepolia": "npx hardhat run scripts/deploy.js --network sepolia",
+    "interact": "npx hardhat run scripts/interact.js",
+    "node": "npx hardhat node"
+  },
+  "keywords": [
+    "blockchain",
+    "staking",
+    "ethereum",
+    "solidity"
+  ],
+  "author": "Dylan",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "hardhat": "^2.19.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0",
+    "@openzeppelin/contracts-upgradeable": "^5.4.0",
+    "@openzeppelin/hardhat-upgrades": "^3.9.1",
+    "dotenv": "^17.2.1"
+  },
+  "type": "module"
+}

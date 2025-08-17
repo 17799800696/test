@@ -1,0 +1,46 @@
+{
+  "network": {
+    "name": "sepolia",
+    "chainId": "11155111"
+  },
+  "deployer": "0xB73fB1c8F42A3ca9E28C71C3A1B512A83C2377A6",
+  "timestamp": "2025-08-17T11:40:38.373Z",
+  "blockNumber": 9003672,
+  "contracts": {
+    "MetaNodeToken": {
+      "address": "0x8C35F578aE776f9ef6639288404BfD4B8c9Bee39",
+      "name": "MetaNode Token",
+      "symbol": "MNT",
+      "initialSupply": "10000000.0"
+    },
+    "StakeContract": {
+      "address": "0x5F5F46F451D7bF4bCDAB3Bf4D688eAd025165f1C",
+      "rewardPerBlock": "1.0",
+      "startBlock": 0
+    },
+    "MockERC20": {
+      "address": "0x94756329e13E723e201A4498E26B99b9778c30fc",
+      "name": "Mock Stake Token",
+      "symbol": "MST",
+      "supply": "1000000"
+    }
+  },
+  "pools": [
+    {
+      "id": 0,
+      "name": "ETH Pool",
+      "stTokenAddress": "0x0000000000000000000000000000000000000000",
+      "weight": 100,
+      "minDepositAmount": "0.01",
+      "unstakeLockedBlocks": 100
+    },
+    {
+      "id": 1,
+      "name": "Mock Token Pool",
+      "stTokenAddress": "0x94756329e13E723e201A4498E26B99b9778c30fc",
+      "weight": 200,
+      "minDepositAmount": "10",
+      "unstakeLockedBlocks": 200
+    }
+  ]
+}

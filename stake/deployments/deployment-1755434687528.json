@@ -1,0 +1,46 @@
+{
+  "network": {
+    "name": "localhost",
+    "chainId": "1337"
+  },
+  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "timestamp": "2025-08-17T12:44:47.526Z",
+  "blockNumber": 253,
+  "contracts": {
+    "MetaNodeToken": {
+      "address": "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
+      "name": "MetaNode Token",
+      "symbol": "MNT",
+      "initialSupply": "10000000.0"
+    },
+    "StakeContract": {
+      "address": "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
+      "rewardPerBlock": "1.0",
+      "startBlock": 0
+    },
+    "MockERC20": {
+      "address": "0x610178dA211FEF7D417bC0e6FeD39F05609AD788",
+      "name": "Mock Stake Token",
+      "symbol": "MST",
+      "supply": "1000000"
+    }
+  },
+  "pools": [
+    {
+      "id": 0,
+      "name": "ETH Pool",
+      "stTokenAddress": "0x0000000000000000000000000000000000000000",
+      "weight": 100,
+      "minDepositAmount": "0.01",
+      "unstakeLockedBlocks": 100
+    },
+    {
+      "id": 1,
+      "name": "Mock Token Pool",
+      "stTokenAddress": "0x610178dA211FEF7D417bC0e6FeD39F05609AD788",
+      "weight": 200,
+      "minDepositAmount": "10",
+      "unstakeLockedBlocks": 200
+    }
+  ]
+}
