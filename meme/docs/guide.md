@@ -89,6 +89,17 @@
   await token.emergencyWithdrawETH()
   await token.emergencyWithdrawTokens(<erc20>)
 
+- 频率限制配置：
+  await token.setCooldownPeriod(60) // 设置冷却时间为60秒
+  await token.setDailyTransactionLimit(100) // 设置每日交易次数限制为100次
+
+- 用户级流动性包装器：
+  // 用户添加流动性（需要先授权代币）
+  await token.userAddLiquidityETH(tokenAmount, tokenAmountMin, ethAmountMin, { value: ethAmount })
+  
+  // 用户移除流动性（需要先授权LP代币）
+  await token.userRemoveLiquidityETH(liquidity, tokenAmountMin, ethAmountMin)
+
 ## 6. 查询函数
 - 税费信息：
   const [buy, sell, transfer, liq, mkt, burn] = await token.getTaxInfo()
@@ -96,28 +107,69 @@
   const [maxTx, maxWallet, swapThreshold] = await token.getLimitsInfo()
 - 状态信息：
   const [totalSupply_, totalTaxCollected_, totalBurned_, tradingEnabled_, swapEnabled_] = await token.getStats()
+- 频率限制查询：
+  const cooldownPeriod = await token.cooldownPeriod()
+  const dailyLimit = await token.dailyTransactionLimit()
+  const userCooldown = await token.getUserCooldownInfo(userAddress)
+  const userDailyCount = await token.getUserDailyTransactionCount(userAddress)
+- LP包装器查询：
+  const lpEnabled = await token.userLpEnabled()
+  const pairAddress = await token.uniswapV2Pair()
 
-## 7. 转账与分配流程图（Mermaid）
+## 7. 完整转账流程图（Mermaid）
 ```mermaid
 graph TD
   A[转账 _update] --> B{是否铸造或销毁}
   B -->|是| C[super._update]
   B -->|否| D[检查：已开启交易 或 from/to 免限]
   D -->|否| E[revert: Trading not enabled]
-  D -->|是| F{检查限额}
-  F -->|超额| G[revert]
-  F -->|通过| H{可自动分配 且 合约余额>=阈值 且 非递归 且 非AMM卖出}
-  H -->|是| I[执行分配：销毁/转营销/转流动性]
-  H -->|否| J[跳过]
-  I --> K{是否需要收税}
-  J --> K{是否需要收税}
-  K -->|是| L[计算税率并将税额转入合约]
-  K -->|否| M[税额为 0]
-  L --> N[扣税后转账]
-  M --> N[直接转账]
+  D -->|是| F{检查黑名单}
+  F -->|在黑名单| G[revert: Blacklisted]
+  F -->|不在黑名单| H{检查频率限制}
+  H -->|冷却时间未到| I[revert: Cooldown period]
+  H -->|超过每日限制| J[revert: Daily limit exceeded]
+  H -->|频率检查通过| K{检查交易限额}
+  K -->|超过单笔限额| L[revert: Max transaction amount]
+  K -->|超过钱包限额| M[revert: Max wallet amount]
+  K -->|限额检查通过| N[更新频率限制记录]
+  N --> O{可自动分配 且 合约余额>=阈值 且 非递归 且 非AMM卖出}
+  O -->|是| P[执行分配：销毁/转营销/转流动性]
+  O -->|否| Q[跳过自动分配]
+  P --> R{是否需要收税}
+  Q --> R{是否需要收税}
+  R -->|是| S[计算税率并将税额转入合约]
+  R -->|否| T[税额为 0]
+  S --> U[扣税后转账]
+  T --> U[直接转账]
 ```
 
-## 8. 常见问题
+## 8. 用户级流动性操作流程图
+```mermaid
+graph TD
+  A1[用户添加流动性] --> B1{检查userLpEnabled}
+  B1 -->|未开启| C1[revert: User LP not enabled]
+  B1 -->|已开启| D1{检查参数有效性}
+  D1 -->|无效| E1[revert: Invalid parameters]
+  D1 -->|有效| F1[从用户转入代币到合约]
+  F1 --> G1[授权Router使用代币]
+  G1 --> H1[调用Router.addLiquidityETH]
+  H1 -->|成功| I1[触发UserAddLiquidity事件]
+  H1 -->|失败| J1[退还代币和ETH给用户]
+  J1 --> K1[revert: AddLiquidity failed]
+  
+  A2[用户移除流动性] --> B2{检查userLpEnabled}
+  B2 -->|未开启| C2[revert: User LP not enabled]
+  B2 -->|已开启| D2{检查参数有效性}
+  D2 -->|无效| E2[revert: Invalid parameters]
+  D2 -->|有效| F2[从用户转入LP代币到合约]
+  F2 --> G2[授权Router使用LP代币]
+  G2 --> H2[调用Router.removeLiquidityETH]
+  H2 -->|成功| I2[触发UserRemoveLiquidity事件]
+  H2 -->|失败| J2[退还LP代币给用户]
+  J2 --> K2[revert: RemoveLiquidity failed]
+```
+
+## 9. 常见问题
 - 部署脚本读取不到 .env：
   脚本从 ../.env 读取，请确保环境变量放在项目根目录；或自行修改脚本内 dotenv 路径。
 

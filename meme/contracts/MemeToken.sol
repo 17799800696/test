@@ -2,8 +2,94 @@
 pragma solidity ^0.8.28;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+// Uniswap V2 接口
+interface IUniswapV2Factory {
+    function createPair(address tokenA, address tokenB) external returns (address pair);
+}
+
+interface IUniswapV2Pair {
+    function factory() external view returns (address);
+    function token0() external view returns (address);
+    function token1() external view returns (address);
+    function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
+}
+
+interface IUniswapV2Router02 {
+    function factory() external pure returns (address);
+    function WETH() external pure returns (address);
+
+    function addLiquidity(
+        address tokenA,
+        address tokenB,
+        uint amountADesired,
+        uint amountBDesired,
+        uint amountAMin,
+        uint amountBMin,
+        address to,
+        uint deadline
+    ) external returns (uint amountA, uint amountB, uint liquidity);
+
+    function addLiquidityETH(
+        address token,
+        uint amountTokenDesired,
+        uint amountTokenMin,
+        uint amountETHMin,
+        address to,
+        uint deadline
+    ) external payable returns (uint amountToken, uint amountETH, uint liquidity);
+
+    function removeLiquidity(
+        address tokenA,
+        address tokenB,
+        uint liquidity,
+        uint amountAMin,
+        uint amountBMin,
+        address to,
+        uint deadline
+    ) external returns (uint amountA, uint amountB);
+
+    function removeLiquidityETH(
+        address token,
+        uint liquidity,
+        uint amountTokenMin,
+        uint amountETHMin,
+        address to,
+        uint deadline
+    ) external returns (uint amountToken, uint amountETH);
+
+    function swapExactTokensForTokensSupportingFeeOnTransferTokens(
+        uint amountIn,
+        uint amountOutMin,
+        address[] calldata path,
+        address to,
+        uint deadline
+    ) external;
+
+    function swapExactTokensForETHSupportingFeeOnTransferTokens(
+        uint amountIn,
+        uint amountOutMin,
+        address[] calldata path,
+        address to,
+        uint deadline
+    ) external;
+
+    function swapExactETHForTokensSupportingFeeOnTransferTokens(
+        uint amountOutMin,
+        address[] calldata path,
+        address to,
+        uint deadline
+    ) external payable;
+
+    function quote(uint amountA, uint reserveA, uint reserveB) external pure returns (uint amountB);
+    function getAmountOut(uint amountIn, uint reserveIn, uint reserveOut) external pure returns (uint amountOut);
+    function getAmountIn(uint amountOut, uint reserveIn, uint reserveOut) external pure returns (uint amountIn);
+    function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts);
+    function getAmountsIn(uint amountOut, address[] calldata path) external view returns (uint[] memory amounts);
+}
 
 /**
  * @title MemeToken - SHIB 风格的 Meme 代币合约
@@ -30,11 +116,28 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
     address public marketingWallet;      // 营销钱包
     address public uniswapV2Pair;        // Uniswap V2 交易对地址
     address public uniswapV2Router;      // Uniswap V2 路由器地址
+    IUniswapV2Router02 public immutable router; // Router 接口实例
     
     // ========== 交易限制配置 ==========
     uint256 public maxTransactionAmount;     // 单笔交易最大额度
     uint256 public maxWalletAmount;          // 单个钱包最大持有量
     uint256 public swapTokensAtAmount;       // 自动换币阈值
+
+    // 频率限制（B1 冷却时间 + B2 每日次数限制）
+    bool public cooldownEnabled = true;      // 冷却开关（默认开）
+    uint256 public cooldownSeconds = 30;     // 冷却秒数（默认 30s）
+    bool public dailyLimitEnabled = true;    // 每日次数限制开关（默认开）
+    uint256 public maxDailyTxCount = 50;     // 每日最大次数（默认 50 次）
+
+    mapping(address => uint256) private _lastTxTimestamp; // 最近一次交易时间
+    mapping(address => uint256) private _lastTxDay;        // 最近一次交易的自然日索引
+    mapping(address => uint256) private _dailyTxCount;     // 自然日内已发生的交易次数
+
+    // LP 增强配置
+    bool public autoLiquidityEnabled = true;  // A1: 自动加池开关
+    bool public userLpEnabled = true;         // A2: 用户级 LP 包装器开关
+    uint256 public defaultSlippagePercent = 200; // 默认滑点 2%（200/10000）
+    uint256 public defaultDeadlineMinutes = 20;  // 默认截止时间 20 分钟
     
     // ========== 状态变量 ==========
     bool public tradingEnabled = false;      // 交易开关
@@ -58,6 +161,10 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
     event SwapAndLiquify(uint256 tokensSwapped, uint256 ethReceived, uint256 tokensIntoLiquidity);
     event TaxCollected(address indexed from, address indexed to, uint256 amount, uint256 tax);
     event TokensBurned(uint256 amount);
+    event FrequencyParamsUpdated(bool cooldownEnabled, uint256 cooldownSeconds, bool dailyLimitEnabled, uint256 maxDailyTxCount);
+    event LpConfigUpdated(bool autoLpEnabled, bool userLpEnabled, uint256 slippagePercent, uint256 deadlineMinutes);
+    event UserAddLiquidity(address indexed user, uint256 tokenAmount, uint256 ethAmount, uint256 lpTokens);
+    event UserRemoveLiquidity(address indexed user, uint256 lpTokens, uint256 tokenAmount, uint256 ethAmount);
     
     // ========== 修饰符 ==========
     modifier lockTheSwap {
@@ -81,6 +188,7 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
         liquidityWallet = _liquidityWallet;
         marketingWallet = _marketingWallet;
         uniswapV2Router = _uniswapV2Router;
+        router = IUniswapV2Router02(_uniswapV2Router);
         
         // 设置交易限制（总供应量的百分比）
         maxTransactionAmount = MAX_SUPPLY * 1 / 100;  // 1%
@@ -105,6 +213,49 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
     // ========== 接收 ETH ==========
     receive() external payable {}
     
+    // 频率限制：是否豁免
+    function _isFrequencyExempt(address account) internal view returns (bool) {
+        return account == address(0)
+            || account == address(this)
+            || account == owner()
+            || account == marketingWallet
+            || account == liquidityWallet
+            || account == uniswapV2Pair
+            || account == uniswapV2Router
+            || isExcludedFromLimits[account];
+    }
+
+    // 频率限制：只读检查（不修改状态）
+    function _checkFrequency(address account) internal view {
+        if (_isFrequencyExempt(account)) return;
+        if (cooldownEnabled) {
+            uint256 lastTs = _lastTxTimestamp[account];
+            require(block.timestamp >= lastTs + cooldownSeconds, "Cooldown: wait");
+        }
+        if (dailyLimitEnabled) {
+            uint256 dayIndex = block.timestamp / 1 days;
+            uint256 count = _dailyTxCount[account];
+            uint256 lastDay = _lastTxDay[account];
+            if (lastDay != dayIndex) {
+                // 新的一天，视为 0 次后再+1 的检查由 _recordFrequency 负责
+                count = 0;
+            }
+            require(count + 1 <= maxDailyTxCount, "Daily tx limit exceeded");
+        }
+    }
+
+    // 频率限制：记录（在转账成功后调用）
+    function _recordFrequency(address account) internal {
+        if (_isFrequencyExempt(account)) return;
+        _lastTxTimestamp[account] = block.timestamp;
+        uint256 dayIndex = block.timestamp / 1 days;
+        if (_lastTxDay[account] != dayIndex) {
+            _lastTxDay[account] = dayIndex;
+            _dailyTxCount[account] = 0;
+        }
+        _dailyTxCount[account] += 1;
+    }
+    
     // ========== 核心转账逻辑重写 ==========
     function _update(address from, address to, uint256 amount) internal override {
         require(!isBlacklisted[from] && !isBlacklisted[to], "Blacklisted address");
@@ -118,6 +269,18 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
         // 检查交易是否已启用
         if (!tradingEnabled) {
             require(isExcludedFromLimits[from] || isExcludedFromLimits[to], "Trading not enabled");
+        }
+        
+        // 交易频率预检查（只读，避免前置转账）
+        bool isBuy = isAMMPair[from];
+        bool isSell = isAMMPair[to];
+        if (isBuy) {
+            _checkFrequency(to);
+        } else if (isSell) {
+            _checkFrequency(from);
+        } else {
+            _checkFrequency(from);
+            _checkFrequency(to);
         }
         
         // 检查交易限制
@@ -159,6 +322,16 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
         // 执行转账（扣除税费后的金额）
         uint256 transferAmount = amount - taxAmount;
         super._update(from, to, transferAmount);
+
+        // 成功后记录频率
+        if (isBuy) {
+            _recordFrequency(to);
+        } else if (isSell) {
+            _recordFrequency(from);
+        } else {
+            _recordFrequency(from);
+            _recordFrequency(to);
+        }
     }
     
     // ========== 税费计算 ==========
@@ -179,7 +352,7 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
         return amount * taxRate / TAX_DENOMINATOR;
     }
     
-    // ========== 自动换币和加流动性 ==========
+    // ========== A1: 自动换币和加流动性（生产化版本） ==========
     function _swapAndLiquify(uint256 contractTokenBalance) internal lockTheSwap {
         // 计算各部分分配
         uint256 liquidityTokens = contractTokenBalance * liquidityTaxShare / TAX_DENOMINATOR;
@@ -198,12 +371,159 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
             super._update(address(this), marketingWallet, marketingTokens);
         }
         
-        // 将流动性代币转给流动性钱包
-        if (liquidityTokens > 0) {
+        // A1: 自动加池生产化（如果启用且有 Pair）
+        if (autoLiquidityEnabled && liquidityTokens > 0 && uniswapV2Pair != address(0)) {
+            _addLiquidityAuto(liquidityTokens);
+        } else if (liquidityTokens > 0) {
+            // 回退到简化版：转给流动
             super._update(address(this), liquidityWallet, liquidityTokens);
         }
         
         emit SwapAndLiquify(contractTokenBalance, 0, liquidityTokens);
+    }
+
+    // A1: 自动加池的核心逻辑
+    function _addLiquidityAuto(uint256 tokenAmount) internal {
+        if (tokenAmount == 0) return;
+        
+        // 将一半代币换成 ETH
+        uint256 half = tokenAmount / 2;
+        uint256 otherHalf = tokenAmount - half;
+        
+        // 记录当前 ETH 余额
+        uint256 initialBalance = address(this).balance;
+        
+        // 换币：代币 -> ETH
+        _swapTokensForEth(half);
+        
+        // 计算新增的 ETH
+        uint256 newBalance = address(this).balance - initialBalance;
+        
+        // 加流动性：剩余代币 + 新增 ETH
+        if (newBalance > 0 && otherHalf > 0) {
+            _addLiquidityETH(otherHalf, newBalance);
+        }
+    }
+
+    // 代币换 ETH
+    function _swapTokensForEth(uint256 tokenAmount) internal {
+        if (tokenAmount == 0) return;
+        
+        address[] memory path = new address[](2);
+        path[0] = address(this);
+        path[1] = router.WETH();
+        
+        _approve(address(this), uniswapV2Router, tokenAmount);
+        
+        try router.swapExactTokensForETHSupportingFeeOnTransferTokens(
+            tokenAmount,
+            0, // 接受任何数量的 ETH
+            path,
+            address(this),
+            block.timestamp + defaultDeadlineMinutes * 60
+        ) {} catch {
+            // 兑换失败时静默处理，避免阻塞转账
+        }
+    }
+
+    // 添加流动性（ETH 配对）
+    function _addLiquidityETH(uint256 tokenAmount, uint256 ethAmount) internal {
+        if (tokenAmount == 0 || ethAmount == 0) return;
+        
+        _approve(address(this), uniswapV2Router, tokenAmount);
+        
+        try router.addLiquidityETH{value: ethAmount}(
+            address(this),
+            tokenAmount,
+            0, // 滑点保护由调用方控制（自动加池使用 0）
+            0,
+            liquidityWallet, // LP 代币给流动
+            block.timestamp + defaultDeadlineMinutes * 60
+        ) {} catch {
+            // 加池失败时静默处理
+        }
+    }
+    
+    // ========== A2: 用户级 LP 包装器 ==========
+    
+    /**
+     * @dev A2: 用户添加流动性包装器（ETH 配对）
+     */
+    function userAddLiquidityETH(
+        uint256 tokenAmount,
+        uint256 tokenAmountMin,
+        uint256 ethAmountMin
+    ) external payable nonReentrant {
+        require(userLpEnabled, "User LP disabled");
+        require(uniswapV2Pair != address(0), "Pair not set");
+        require(tokenAmount > 0 && msg.value > 0, "Invalid amounts");
+        
+        // 从用户转入代币
+        _transfer(msg.sender, address(this), tokenAmount);
+        
+        // 授权给 Router
+        _approve(address(this), uniswapV2Router, tokenAmount);
+        
+        // 调用 Router 加池
+        try router.addLiquidityETH{value: msg.value}(
+            address(this),
+            tokenAmount,
+            tokenAmountMin,
+            ethAmountMin,
+            msg.sender, // LP 代币直接给用户
+            block.timestamp + defaultDeadlineMinutes * 60
+        ) returns (uint amountToken, uint amountETH, uint liquidity) {
+            emit UserAddLiquidity(msg.sender, amountToken, amountETH, liquidity);
+        } catch Error(string memory reason) {
+            // 失败时退还资产
+            _transfer(address(this), msg.sender, tokenAmount);
+            payable(msg.sender).transfer(msg.value);
+            revert(string.concat("AddLiquidity failed: ", reason));
+        } catch {
+            // 失败时退还资产
+            _transfer(address(this), msg.sender, tokenAmount);
+            payable(msg.sender).transfer(msg.value);
+            revert("AddLiquidity failed");
+        }
+    }
+    
+    /**
+     * @dev A2: 用户移除流动性包装器（ETH 配对）
+     */
+    function userRemoveLiquidityETH(
+        uint256 liquidity,
+        uint256 tokenAmountMin,
+        uint256 ethAmountMin
+    ) external nonReentrant {
+        require(userLpEnabled, "User LP disabled");
+        require(uniswapV2Pair != address(0), "Pair not set");
+        require(liquidity > 0, "Invalid liquidity");
+        
+        // 从用户转入 LP 代币
+        IERC20(uniswapV2Pair).transferFrom(msg.sender, address(this), liquidity);
+        
+        // 授权给 Router
+        IERC20(uniswapV2Pair).approve(uniswapV2Router, liquidity);
+        
+        // 调用 Router 移除流动性
+        try router.removeLiquidityETH(
+            address(this),
+            liquidity,
+            tokenAmountMin,
+            ethAmountMin,
+            msg.sender, // 资产直接给用户
+            block.timestamp + defaultDeadlineMinutes * 60
+        ) returns (uint amountToken, uint amountETH) {
+            emit UserRemoveLiquidity(msg.sender, liquidity, amountToken, amountETH);
+        } catch Error(string memory reason) {
+            // 失败时退还 LP 代币
+            IERC20(uniswapV2Pair).transfer(msg.sender, liquidity);
+            revert(string.concat("RemoveLiquidity failed: ", reason));
+        } catch {
+            // 失败时退还 LP 代币
+            IERC20(uniswapV2Pair).transfer(msg.sender, liquidity);
+            revert("RemoveLiquidity failed");
+        }
     }
     
     // ========== 管理员功能 ==========
@@ -291,6 +611,42 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
         
         maxTransactionAmount = MAX_SUPPLY * _maxTransactionPercent / 100;
         maxWalletAmount = MAX_SUPPLY * _maxWalletPercent / 100;
+    }
+
+    /**
+     * @dev 更新频率限制参数
+     */
+    function updateFrequencyLimits(
+        bool _cooldownEnabled,
+        uint256 _cooldownSeconds,
+        bool _dailyLimitEnabled,
+        uint256 _maxDailyTxCount
+    ) external onlyOwner {
+        require(_cooldownSeconds <= 1 hours, "Cooldown too long");
+        require(_maxDailyTxCount <= 1000, "Daily count too high");
+        cooldownEnabled = _cooldownEnabled;
+        cooldownSeconds = _cooldownSeconds;
+        dailyLimitEnabled = _dailyLimitEnabled;
+        maxDailyTxCount = _maxDailyTxCount;
+        emit FrequencyParamsUpdated(cooldownEnabled, cooldownSeconds, dailyLimitEnabled, maxDailyTxCount);
+    }
+
+    /**
+     * @dev 更新 LP 增强配置
+     */
+    function updateLpConfig(
+        bool _autoLiquidityEnabled,
+        bool _userLpEnabled,
+        uint256 _slippagePercent,
+        uint256 _deadlineMinutes
+    ) external onlyOwner {
+        require(_slippagePercent <= 1000, "Slippage too high"); // 最大 10%
+        require(_deadlineMinutes >= 1 && _deadlineMinutes <= 120, "Invalid deadline");
+        autoLiquidityEnabled = _autoLiquidityEnabled;
+        userLpEnabled = _userLpEnabled;
+        defaultSlippagePercent = _slippagePercent;
+        defaultDeadlineMinutes = _deadlineMinutes;
+        emit LpConfigUpdated(autoLiquidityEnabled, userLpEnabled, defaultSlippagePercent, defaultDeadlineMinutes);
     }
     
     /**
@@ -386,6 +742,39 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
             maxTransactionAmount,
             maxWalletAmount,
             swapTokensAtAmount
+        );
+    }
+
+    /**
+     * @dev 获取频率限制信息
+     */
+    function getFrequencyInfo() external view returns (
+        bool cooldownOn,
+        uint256 cooldownSec,
+        bool dailyLimitOn,
+        uint256 maxDailyCount
+    ) {
+        return (cooldownEnabled, cooldownSeconds, dailyLimitEnabled, maxDailyTxCount);
+    }
+
+    /**
+     * @dev 获取 LP 增强信息
+     */
+    function getLpInfo() external view returns (
+        bool autoLpOn,
+        bool userLpOn,
+        uint256 slippagePercent,
+        uint256 deadlineMinutes,
+        address pairAddress,
+        address routerAddress
+    ) {
+        return (
+            autoLiquidityEnabled,
+            userLpEnabled,
+            defaultSlippagePercent,
+            defaultDeadlineMinutes,
+            uniswapV2Pair,
+            uniswapV2Router
         );
     }
     

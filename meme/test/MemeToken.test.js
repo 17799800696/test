@@ -11,6 +11,8 @@ describe("MemeToken", function () {
     token = await MemeToken.deploy("MemeToken", "MEME", liq.address, mkt.address, router.address);
     await token.waitForDeployment();
     await token.setTradingEnabled(true);
+    // 新增：测试中关闭交易频率限制，避免冷却时间等影响既有用例
+    await token.updateFrequencyLimits(false, 0, false, 1000);
   });
 
   describe("基础功能", function () {
