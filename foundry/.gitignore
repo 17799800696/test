@@ -1,0 +1,71 @@
+# Foundry项目.gitignore文件
+
+# 编译输出
+out/
+cache/
+
+# 依赖
+node_modules/
+
+# 环境变量文件
+.env
+.env.local
+.env.*.local
+
+# IDE和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统生成的文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 日志文件
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 临时文件
+*.tmp
+*.temp
+
+# 测试覆盖率报告
+coverage/
+lcov.info
+
+# Gas报告
+.gas-snapshot
+
+# 部署相关
+broadcast/
+
+# 本地测试网络数据
+.anvil/
+
+# 私钥文件（重要：永远不要提交私钥）
+*.key
+*.pem
+private-keys/
+
+# 备份文件
+*.bak
+*.backup
+
+# 压缩文件
+*.zip
+*.tar.gz
+*.rar
+
+# Foundry特定
+# 保留lib/forge-std，但忽略其他可能的依赖
+lib/*
+!lib/forge-std/
