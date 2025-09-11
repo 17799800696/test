@@ -1,0 +1,22 @@
+{
+  "name": "erc20-tracker",
+  "version": "1.0.0",
+  "description": "ERC20代币追踪与积分计算系统",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
+    "deploy:base-sepolia": "hardhat run scripts/deploy.js --network baseSepolia",
+    "test": "hardhat test",
+    "verify": "hardhat verify"
+  },
+  "keywords": ["ethereum", "erc20", "tracking", "points"],
+  "author": "Dylan",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "hardhat": "^2.19.0",
+    "dotenv": "^16.3.1"
+  }
+}

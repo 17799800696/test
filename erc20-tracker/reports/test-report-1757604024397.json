@@ -1,0 +1,33 @@
+{
+  "timestamp": "2025-09-11T15:20:24.384Z",
+  "contract": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+  "network": "localhost",
+  "tests": {
+    "mint": {
+      "amount1": "1000",
+      "amount2": "500",
+      "status": "✅ 成功"
+    },
+    "transfer": {
+      "amount1": "300",
+      "amount2": "100",
+      "status": "✅ 成功"
+    },
+    "burn": {
+      "amount1": "200",
+      "amount2": "50",
+      "status": "✅ 成功"
+    },
+    "batchMint": {
+      "recipients": 2,
+      "totalAmount": "125",
+      "status": "✅ 成功"
+    }
+  },
+  "finalBalances": {
+    "deployer": "500.0",
+    "user1": "450.0",
+    "user2": "425.0"
+  },
+  "totalSupply": "1375.0"
+}
