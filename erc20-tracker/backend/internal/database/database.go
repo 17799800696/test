@@ -38,7 +38,7 @@ func NewDB(cfg *config.Config) (*DB, error) {
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),
 		NowFunc: func() time.Time {
-			return time.Now().UTC()
+			return time.Now().Local()
 		},
 	})
 	if err != nil {
@@ -186,7 +186,7 @@ func (r *UserPointsRepository) GetOrCreate(userAddress string, chainID int64) (*
 				UserAddress:      userAddress,
 				ChainID:          chainID,
 				TotalPoints:      0,
-				LastCalculatedAt: time.Now().UTC(),
+				LastCalculatedAt: time.Now().Local(),
 			}
 			if err := r.db.Create(&points).Error; err != nil {
 				return nil, fmt.Errorf("创建用户积分记录失败: %w", err)
@@ -246,7 +246,7 @@ func (r *BlockSyncStatusRepository) GetOrCreate(chainID int64) (*BlockSyncStatus
 			status = BlockSyncStatus{
 				ChainID:         chainID,
 				LastSyncedBlock: 0,
-				LastSyncedAt:    time.Now().UTC(),
+				LastSyncedAt:    time.Now().Local(),
 			}
 			if err := r.db.Create(&status).Error; err != nil {
 				return nil, fmt.Errorf("创建同步状态记录失败: %w", err)
@@ -266,7 +266,7 @@ func (r *BlockSyncStatusRepository) UpdateLastSyncedBlock(chainID int64, blockNu
 	}
 
 	status.LastSyncedBlock = blockNumber
-	status.LastSyncedAt = time.Now().UTC()
+	status.LastSyncedAt = time.Now().Local()
 	return r.db.Save(status).Error
 }
 

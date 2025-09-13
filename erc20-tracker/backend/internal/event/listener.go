@@ -383,7 +383,7 @@ func (el *EventListener) processLog(vLog types.Log) error {
 		return fmt.Errorf("获取区块信息失败: %w", err)
 	}
 
-	timestamp := time.Unix(int64(block.Time()), 0).UTC()
+	timestamp := time.Unix(int64(block.Time()), 0).Local()
 
 	// 根据事件类型处理
 	switch vLog.Topics[0] {

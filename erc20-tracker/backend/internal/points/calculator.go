@@ -152,14 +152,22 @@ func (pc *PointsCalculator) calculateTimeWeightedPoints(userAddress string, chai
 
 // calculatePoints 计算积分：积分 = 余额 × 0.05 × 持有时间(小时)
 func (pc *PointsCalculator) calculatePoints(balance *big.Int, holdingHours float64) float64 {
-	// 将余额转换为以太单位（除以10^18）
-	balanceFloat, _ := new(big.Float).SetInt(balance).Float64()
-	balanceInEther := balanceFloat / math.Pow(10, 18)
+	// 使用更高精度的big.Float进行计算
+	balanceFloat := new(big.Float).SetInt(balance)
+	balanceInEther := new(big.Float).Quo(balanceFloat, big.NewFloat(math.Pow(10, 18)))
 
-	// 积分计算公式：积分 = 余额 × 0.05 × 持有时间(小时)
-	points := balanceInEther * 0.05 * holdingHours
+	// 计算积分
+	pointsFloat := new(big.Float).Mul(balanceInEther, big.NewFloat(0.05))
+	points := new(big.Float).Mul(pointsFloat, big.NewFloat(holdingHours))
 
-	return points
+	// 如果积分小于0.0001，则返回0
+	if points.Cmp(big.NewFloat(0.0001)) < 0 {
+		return 0
+	}
+
+	// 四舍五入到4位小数
+	result, _ := points.Float64()
+	return math.Round(result*10000) / 10000
 }
 
 // calculateAverageBalance 计算平均余额和总持有时间
@@ -169,7 +177,7 @@ func (pc *PointsCalculator) calculateAverageBalance(changes []database.BalanceCh
 	}
 
 	totalDuration := endTime.Sub(startTime)
-	totalHours := totalDuration.Hours()
+	totalSeconds := totalDuration.Seconds()
 
 	// 计算加权平均余额
 	weightedSum := big.NewFloat(0)
@@ -179,8 +187,9 @@ func (pc *PointsCalculator) calculateAverageBalance(changes []database.BalanceCh
 	for _, change := range changes {
 		if change.Timestamp.After(currentTime) {
 			duration := change.Timestamp.Sub(currentTime)
-			weight := duration.Seconds() / totalDuration.Seconds()
+			weight := duration.Seconds() / totalSeconds
 
+			// 使用更精确的浮点计算
 			balanceFloat := new(big.Float).SetInt(currentBalance)
 			weightedBalance := new(big.Float).Mul(balanceFloat, big.NewFloat(weight))
 			weightedSum.Add(weightedSum, weightedBalance)
@@ -193,7 +202,7 @@ func (pc *PointsCalculator) calculateAverageBalance(changes []database.BalanceCh
 	// 处理最后一段时间
 	if endTime.After(currentTime) {
 		duration := endTime.Sub(currentTime)
-		weight := duration.Seconds() / totalDuration.Seconds()
+		weight := duration.Seconds() / totalSeconds
 
 		balanceFloat := new(big.Float).SetInt(currentBalance)
 		weightedBalance := new(big.Float).Mul(balanceFloat, big.NewFloat(weight))
@@ -202,7 +211,7 @@ func (pc *PointsCalculator) calculateAverageBalance(changes []database.BalanceCh
 
 	// 转换回big.Int
 	averageBalance, _ := weightedSum.Int(nil)
-	return averageBalance, totalHours
+	return averageBalance, totalSeconds / 3600 // 返回小时数
 }
 
 // addPointsAndLog 添加积分并记录日志
@@ -216,7 +225,7 @@ func (pc *PointsCalculator) addPointsAndLog(userAddress string, chainID int64, p
 	calcLog := &database.PointsCalculationLog{
 		UserAddress:     userAddress,
 		ChainID:         chainID,
-		CalculationTime: time.Now().UTC(),
+		CalculationTime: time.Now().Local(),
 		StartTime:       startTime,
 		EndTime:         endTime,
 		PointsEarned:    points,
@@ -242,20 +251,22 @@ func (pc *PointsCalculator) addPointsAndLog(userAddress string, chainID int64, p
 }
 
 // CalculateHourlyPoints 计算每小时积分（定时任务调用）
-func (pc *PointsCalculator) CalculateHourlyPoints() error {
-	now := time.Now().UTC()
-	// 计算上一个小时的积分
-	endTime := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC)
-	startTime := endTime.Add(-time.Hour)
+func (pc *PointsCalculator) CalculateHourlyPoints(endTimeOptional ...time.Time) error {
+	// 如果没有指定endTime，则默认使用当前时间
+	var endTime time.Time
+	if len(endTimeOptional) > 0 {
+		endTime = endTimeOptional[0]
+	} else {
+		endTime = time.Now().Local()
+	}
 
 	logger.WithFields(map[string]any{
-		"start_time": startTime,
-		"end_time":   endTime,
+		"end_time": endTime,
 	}).Info("开始每小时积分计算")
 
 	// 为每个启用的链计算积分
 	for _, chain := range pc.config.GetEnabledChains() {
-		if err := pc.calculatePointsForChain(chain.ChainID, startTime, endTime); err != nil {
+		if err := pc.calculatePointsForChain(chain.ChainID, endTime); err != nil {
 			logger.WithFields(map[string]any{
 				"error":    err,
 				"chain_id": chain.ChainID,
@@ -269,21 +280,22 @@ func (pc *PointsCalculator) CalculateHourlyPoints() error {
 }
 
 // TestCalculatePoints 手动测试积分计算功能
-func (pc *PointsCalculator) TestCalculatePoints() error {
-	// 使用包含实际余额变动的时间段进行测试
-	// 数据库中的时间是本地时间，需要转换为UTC时间进行查询
-	// 本地时间 22:47:36-23:12:36 对应 UTC 时间 14:47:36-15:12:36 (UTC+8)
-	startTime := time.Date(2025, 9, 12, 14, 47, 0, 0, time.UTC)
-	endTime := time.Date(2025, 9, 12, 15, 13, 0, 0, time.UTC)
+func (pc *PointsCalculator) TestCalculatePoints(endTimeOptional ...time.Time) error {
+	// 如果没有指定endTime，则默认使用当前时间
+	var endTime time.Time
+	if len(endTimeOptional) > 0 {
+		endTime = endTimeOptional[0]
+	} else {
+		endTime = time.Now().Local()
+	}
 
 	logger.WithFields(map[string]any{
-		"start_time": startTime,
-		"end_time":   endTime,
+		"end_time": endTime,
 	}).Info("开始测试积分计算")
 
 	// 为每个启用的链计算积分
 	for _, chain := range pc.config.GetEnabledChains() {
-		if err := pc.calculatePointsForChain(chain.ChainID, startTime, endTime); err != nil {
+		if err := pc.calculatePointsForChain(chain.ChainID, endTime); err != nil {
 			logger.WithFields(map[string]any{
 				"error":    err,
 				"chain_id": chain.ChainID,
@@ -298,37 +310,26 @@ func (pc *PointsCalculator) TestCalculatePoints() error {
 }
 
 // calculatePointsForChain 为指定链计算积分
-func (pc *PointsCalculator) calculatePointsForChain(chainID int64, startTime, endTime time.Time) error {
-	// 获取在此时间段内有余额变动的所有用户
-	usersWithChanges, err := pc.getUsersWithChanges(chainID, startTime, endTime)
-	if err != nil {
-		return fmt.Errorf("获取有变动的用户失败: %w", err)
-	}
-
-	// 获取需要计算积分的用户（最后计算时间早于endTime的用户）
-	usersNeedingCalculation, err := pc.repos.UserPoints.GetUsersNeedingCalculation(chainID, endTime)
+func (pc *PointsCalculator) calculatePointsForChain(chainID int64, endTime time.Time) error {
+	// 获取需要计算积分的用户（最后计算时间早于endTime的用户）以及每个人的last_calculated_at
+	usersMap, err := pc.getUsersLastCalculatedAt(chainID, endTime)
 	if err != nil {
 		return fmt.Errorf("获取需要计算积分的用户失败: %w", err)
 	}
 
-	// 合并用户列表
-	allUsers := make(map[string]bool)
-	for _, user := range usersWithChanges {
-		allUsers[user] = true
-	}
-	for _, userPoints := range usersNeedingCalculation {
-		allUsers[userPoints.UserAddress] = true
+	// 如果没有需要计算积分的用户，则返回
+	if len(usersMap) == 0 {
+		return nil
 	}
 
 	logger.WithFields(map[string]any{
 		"chain_id":    chainID,
-		"users_count": len(allUsers),
-		"start_time":  startTime,
+		"users_count": len(usersMap),
 		"end_time":    endTime,
 	}).Info("开始为链计算用户积分")
 
 	// 为每个用户计算积分
-	for userAddress := range allUsers {
+	for userAddress, startTime := range usersMap {
 		if err := pc.CalculatePointsForUser(userAddress, chainID, startTime, endTime); err != nil {
 			logger.WithFields(map[string]any{
 				"error":    err,
@@ -338,43 +339,35 @@ func (pc *PointsCalculator) calculatePointsForChain(chainID int64, startTime, en
 			// 继续处理其他用户
 			continue
 		}
+
+		// 计算完成之后要将endTime（也就是最新的last_calculated_at）更新到user_points表中的相应字段中
+		if err := pc.repos.UserPoints.AddPoints(userAddress, chainID, 0, endTime); err != nil {
+			logger.WithFields(map[string]any{
+				"error":    err,
+				"user":     userAddress,
+				"chain_id": chainID,
+				"end_time": endTime,
+			}).Error("更新用户最后计算时间失败")
+			// 继续处理其他用户
+			continue
+		}
 	}
 
 	return nil
 }
 
-// getUsersWithChanges 获取在指定时间段内有余额变动的用户
-func (pc *PointsCalculator) getUsersWithChanges(chainID int64, startTime, endTime time.Time) ([]string, error) {
-	// 直接从balance_changes表查询有变动的用户
-	changes, err := pc.repos.BalanceChange.GetChangesByTimeRange("", chainID, startTime, endTime)
+func (pc *PointsCalculator) getUsersLastCalculatedAt(chainID int64, endTime time.Time) (map[string]time.Time, error) {
+	// 先查询有哪些users符合当前的条件（chainID, last_calculated_at < endTime）
+	users, err := pc.repos.UserPoints.GetUsersNeedingCalculation(chainID, endTime)
 	if err != nil {
-		return nil, fmt.Errorf("获取余额变动记录失败: %w", err)
+		return nil, fmt.Errorf("获取用户失败: %w", err)
+	}
+	usersMap := make(map[string]time.Time)
+	for _, user := range users {
+		usersMap[user.UserAddress] = user.LastCalculatedAt
 	}
 
-	// 提取唯一的用户地址
-	userSet := make(map[string]bool)
-	for _, change := range changes {
-		if value, ok := userSet[change.UserAddress]; ok && value == true {
-			continue
-		}
-		userSet[change.UserAddress] = true
-	}
-
-	// 转换为切片
-	users := make([]string, 0, len(userSet))
-	for user := range userSet {
-		users = append(users, user)
-	}
-
-	logger.WithFields(map[string]any{
-		"chain_id":      chainID,
-		"start_time":    startTime,
-		"end_time":      endTime,
-		"users_found":   len(users),
-		"changes_found": len(changes),
-	}).Debug("获取有余额变动的用户")
-
-	return users, nil
+	return usersMap, nil
 }
 
 // BackfillPoints 回溯计算积分
@@ -394,12 +387,11 @@ func (pc *PointsCalculator) BackfillPoints(fromTime, toTime time.Time) error {
 
 		// 为每个启用的链计算这一小时的积分
 		for _, chain := range pc.config.GetEnabledChains() {
-			if err := pc.calculatePointsForChain(chain.ChainID, currentTime, nextHour); err != nil {
+			if err := pc.calculatePointsForChain(chain.ChainID, nextHour); err != nil {
 				logger.WithFields(map[string]any{
-					"error":      err,
-					"chain_id":   chain.ChainID,
-					"start_time": currentTime,
-					"end_time":   nextHour,
+					"error":    err,
+					"chain_id": chain.ChainID,
+					"end_time": nextHour,
 				}).Error("回溯积分计算失败")
 				// 继续处理其他链
 				continue
