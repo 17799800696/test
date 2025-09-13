@@ -61,10 +61,11 @@ type EventListener struct {
 	repos           *database.Repositories
 	ctx             context.Context
 	cancel          context.CancelFunc
+	loc             *time.Location
 }
 
 // NewEventListener 创建事件监听器
-func NewEventListener(chainConfig config.ChainConfig, repos *database.Repositories) (*EventListener, error) {
+func NewEventListener(chainConfig config.ChainConfig, repos *database.Repositories, globalConfig *config.Config) (*EventListener, error) {
 	// 连接以太坊客户端
 	client, err := ethclient.Dial(chainConfig.RPCURL)
 	if err != nil {
@@ -80,6 +81,25 @@ func NewEventListener(chainConfig config.ChainConfig, repos *database.Repositori
 	// 解析合约地址
 	contractAddress := common.HexToAddress(chainConfig.ContractAddress)
 
+	// 加载时区位置
+	// 首先尝试使用链特定的时区配置
+	var loc *time.Location
+	if chainConfig.Timezone != "" {
+		loc, err = time.LoadLocation(chainConfig.Timezone)
+		if err != nil {
+			logger.WithField("error", err).Warn("加载链特定时区失败")
+		}
+	}
+
+	// 如果链特定时区未设置或加载失败，则使用全局时区配置
+	if loc == nil {
+		loc, err = time.LoadLocation(globalConfig.Timezone)
+		if err != nil {
+			logger.WithField("error", err).Warn("加载全局时区失败，使用本地时区")
+			loc = time.Local
+		}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &EventListener{
@@ -90,6 +110,7 @@ func NewEventListener(chainConfig config.ChainConfig, repos *database.Repositori
 		repos:           repos,
 		ctx:             ctx,
 		cancel:          cancel,
+		loc:             loc,
 	}, nil
 }
 
@@ -383,7 +404,7 @@ func (el *EventListener) processLog(vLog types.Log) error {
 		return fmt.Errorf("获取区块信息失败: %w", err)
 	}
 
-	timestamp := time.Unix(int64(block.Time()), 0).Local()
+	timestamp := time.Unix(int64(block.Time()), 0).In(el.loc)
 
 	// 根据事件类型处理
 	switch vLog.Topics[0] {
@@ -451,6 +472,60 @@ func (el *EventListener) processTransferEvent(vLog types.Log, timestamp time.Tim
 		if err := el.updateUserBalanceWithoutDuplicateCheck(event.To.Hex(), event.Value, database.ChangeTypeTransferIn, vLog, timestamp, true); err != nil {
 			return fmt.Errorf("更新接收方余额失败: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// processTransferEvents 处理转账事件
+func (el *EventListener) processTransferEvents(logs []types.Log) error {
+	for _, vLog := range logs {
+		// 获取区块信息以获取时间戳
+		block, err := el.client.BlockByNumber(el.ctx, big.NewInt(int64(vLog.BlockNumber)))
+		if err != nil {
+			return fmt.Errorf("获取区块信息失败: %w", err)
+		}
+
+		// 转换时间戳
+		timestamp := time.Unix(int64(block.Time()), 0).In(el.loc)
+
+		// 解析事件数据
+		event := struct {
+			From  common.Address
+			To    common.Address
+			Value *big.Int
+		}{}
+
+		if err := el.contractABI.UnpackIntoInterface(&event, "Transfer", vLog.Data); err != nil {
+			return fmt.Errorf("解析Transfer事件失败: %w", err)
+		}
+
+		// 从topics中获取indexed参数
+		event.From = common.HexToAddress(vLog.Topics[1].Hex())
+		event.To = common.HexToAddress(vLog.Topics[2].Hex())
+
+		logger.WithFields(map[string]interface{}{
+			"from":    event.From.Hex(),
+			"to":      event.To.Hex(),
+			"value":   event.Value.String(),
+			"tx_hash": vLog.TxHash.Hex(),
+			"block":   vLog.BlockNumber,
+		}).Debug("处理Transfer事件")
+
+		// 处理发送方余额变动（如果不是mint）
+		if event.From != (common.Address{}) {
+			if err := el.updateUserBalanceWithoutDuplicateCheck(event.From.Hex(), event.Value, database.ChangeTypeTransferOut, vLog, timestamp, false); err != nil {
+				return fmt.Errorf("更新发送方余额失败: %w", err)
+			}
+		}
+
+		// 处理接收方余额变动（如果不是burn）
+		if event.To != (common.Address{}) {
+			if err := el.updateUserBalanceWithoutDuplicateCheck(event.To.Hex(), event.Value, database.ChangeTypeTransferIn, vLog, timestamp, true); err != nil {
+				return fmt.Errorf("更新接收方余额失败: %w", err)
+			}
+		}
+
 	}
 
 	return nil

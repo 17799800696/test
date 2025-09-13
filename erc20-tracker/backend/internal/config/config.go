@@ -22,6 +22,9 @@ type Config struct {
 
 	// 日志配置
 	Logging LoggingConfig `json:"logging"`
+
+	// 时区配置
+	Timezone string `json:"timezone"`
 }
 
 // DatabaseConfig 数据库配置
@@ -43,6 +46,7 @@ type ChainConfig struct {
 	ContractAddress string `json:"contract_address"`
 	StartBlock      uint64 `json:"start_block"`
 	Enabled         bool   `json:"enabled"`
+	Timezone        string `json:"timezone"`
 }
 
 // SystemConfig 系统配置
@@ -115,6 +119,7 @@ func LoadConfig() (*Config, error) {
 			MaxAge:   getEnvAsInt("LOG_MAX_AGE", 30),
 			Compress: getEnvAsBool("LOG_COMPRESS", true),
 		},
+		Timezone: getEnv("TIMEZONE", "Asia/Shanghai"),
 	}
 
 	// 验证配置

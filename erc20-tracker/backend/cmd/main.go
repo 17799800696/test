@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/robfig/cron/v3"
 
@@ -30,6 +31,7 @@ type Application struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
+	loc        *time.Location
 }
 
 // NewApplication 创建应用程序实例
@@ -66,6 +68,13 @@ func NewApplication() (*Application, error) {
 	}
 	retryMgr := retry.NewRetryManager(retryConfig)
 
+	// 加载时区位置
+	loc, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		logger.WithField("error", err).Warn("加载时区失败，使用本地时区")
+		loc = time.Local
+	}
+
 	// 创建积分计算器
 	calculator := points.NewPointsCalculator(repos, cfg)
 
@@ -81,6 +90,7 @@ func NewApplication() (*Application, error) {
 		retryMgr:   retryMgr,
 		ctx:        ctx,
 		cancel:     cancel,
+		loc:        loc,
 	}, nil
 }
 
@@ -99,9 +109,9 @@ func (app *Application) Start() error {
 	//}
 
 	// 检查是否需要回溯计算积分
-	if err := app.checkAndBackfillPoints(); err != nil {
-		logger.WithField("error", err).Warn("积分回溯检查失败")
-	}
+	//if err := app.checkAndBackfillPoints(); err != nil {
+	//	logger.WithField("error", err).Warn("积分回溯检查失败")
+	//}
 
 	logger.Info("ERC20代币追踪系统启动完成")
 
@@ -123,7 +133,7 @@ func (app *Application) startEventListeners() error {
 	logger.WithField("chains_count", len(enabledChains)).Info("启动事件监听器")
 
 	for _, chainConfig := range enabledChains {
-		listener, err := event.NewEventListener(chainConfig, app.repos)
+		listener, err := event.NewEventListener(chainConfig, app.repos, app.config)
 		if err != nil {
 			return fmt.Errorf("创建事件监听器失败 (链: %s): %w", chainConfig.Name, err)
 		}
@@ -191,8 +201,51 @@ func (app *Application) startCronJobs() error {
 func (app *Application) checkAndBackfillPoints() error {
 	logger.Info("检查是否需要回溯计算积分")
 
-	// 这里可以实现检查逻辑，比如检查系统配置中的最后回溯时间
-	// 如果发现有缺失的时间段，则进行回溯计算
+	// 获取当前时间
+	now := time.Now().In(app.loc)
+
+	// 计算回溯开始时间（例如：回溯最近7天的数据）
+	backfillStartTime := now.AddDate(0, 0, -7) // 7天前
+
+	// 检查各链的最后同步区块时间，确定是否需要回溯
+	for _, chain := range app.config.GetEnabledChains() {
+		// 获取该链的最后同步区块
+		lastSyncedBlock, err := app.repos.BlockSyncStatus.GetLastSyncedBlock(chain.ChainID)
+		if err != nil {
+			logger.WithFields(map[string]interface{}{
+				"error":    err,
+				"chain_id": chain.ChainID,
+				"chain":    chain.Name,
+			}).Warn("获取链最后同步区块失败")
+			continue
+		}
+
+		// 可以根据业务需求检查是否需要回溯计算
+		// 这里简单地对所有启用的链执行回溯计算
+		_ = lastSyncedBlock
+
+		logger.WithFields(map[string]interface{}{
+			"chain":    chain.Name,
+			"chain_id": chain.ChainID,
+			"from":     backfillStartTime,
+			"to":       now,
+		}).Info("开始回溯计算积分")
+
+		// 执行回溯计算
+		if err := app.calculator.BackfillPoints(backfillStartTime, now); err != nil {
+			logger.WithFields(map[string]interface{}{
+				"error":    err,
+				"chain_id": chain.ChainID,
+				"chain":    chain.Name,
+			}).Error("回溯计算积分失败")
+			continue
+		}
+
+		logger.WithFields(map[string]interface{}{
+			"chain":    chain.Name,
+			"chain_id": chain.ChainID,
+		}).Info("回溯计算积分完成")
+	}
 
 	return nil
 }
@@ -201,8 +254,11 @@ func (app *Application) checkAndBackfillPoints() error {
 func (app *Application) testPointsCalculation() error {
 	logger.Info("开始测试积分计算功能")
 
+	// 使用统一的时区
+	now := time.Now().In(app.loc)
+
 	// 执行测试积分计算
-	if err := app.calculator.TestCalculatePoints(); err != nil {
+	if err := app.calculator.TestCalculatePoints(now); err != nil {
 		logger.WithField("error", err).Error("积分计算测试失败")
 		return err
 	}

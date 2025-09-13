@@ -15,13 +15,22 @@ import (
 type PointsCalculator struct {
 	repos  *database.Repositories
 	config *config.Config
+	loc    *time.Location
 }
 
 // NewPointsCalculator 创建积分计算器
 func NewPointsCalculator(repos *database.Repositories, cfg *config.Config) *PointsCalculator {
+	// 加载时区位置
+	loc, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		logger.WithField("error", err).Warn("加载时区失败，使用本地时区")
+		loc = time.Local
+	}
+
 	return &PointsCalculator{
 		repos:  repos,
 		config: cfg,
+		loc:    loc,
 	}
 }
 
@@ -225,7 +234,7 @@ func (pc *PointsCalculator) addPointsAndLog(userAddress string, chainID int64, p
 	calcLog := &database.PointsCalculationLog{
 		UserAddress:     userAddress,
 		ChainID:         chainID,
-		CalculationTime: time.Now().Local(),
+		CalculationTime: time.Now().In(pc.loc),
 		StartTime:       startTime,
 		EndTime:         endTime,
 		PointsEarned:    points,
@@ -255,9 +264,9 @@ func (pc *PointsCalculator) CalculateHourlyPoints(endTimeOptional ...time.Time) 
 	// 如果没有指定endTime，则默认使用当前时间
 	var endTime time.Time
 	if len(endTimeOptional) > 0 {
-		endTime = endTimeOptional[0]
+		endTime = endTimeOptional[0].In(pc.loc)
 	} else {
-		endTime = time.Now().Local()
+		endTime = time.Now().In(pc.loc)
 	}
 
 	logger.WithFields(map[string]any{
@@ -284,9 +293,9 @@ func (pc *PointsCalculator) TestCalculatePoints(endTimeOptional ...time.Time) er
 	// 如果没有指定endTime，则默认使用当前时间
 	var endTime time.Time
 	if len(endTimeOptional) > 0 {
-		endTime = endTimeOptional[0]
+		endTime = endTimeOptional[0].In(pc.loc)
 	} else {
-		endTime = time.Now().Local()
+		endTime = time.Now().In(pc.loc)
 	}
 
 	logger.WithFields(map[string]any{
