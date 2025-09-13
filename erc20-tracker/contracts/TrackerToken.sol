@@ -153,7 +153,7 @@ contract TrackerToken is ERC20, ERC20Burnable, Ownable {
     }
     
     /**
-     * @dev 紧急暂停功能（可选实现）
+     * @dev 紧急暂停功能
      * 在紧急情况下可以暂停所有转账
      */
     bool private _paused = false;

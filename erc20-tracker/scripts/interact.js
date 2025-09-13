@@ -52,11 +52,19 @@ async function main() {
         console.log(`合约地址: ${contractAddress}`);
         
         // 获取签名者
-        const [deployer, user1, user2] = await ethers.getSigners();
+        const signers = await ethers.getSigners();
+        const deployer = signers[0];
+        const user1 = signers[1] || deployer; // 如果没有第二个账户，使用部署者
+        const user2 = signers[2] || deployer; // 如果没有第三个账户，使用部署者
+        
         console.log(`\n👤 账户信息:`);
         console.log(`部署者: ${deployer.address}`);
-        console.log(`用户1: ${user1.address}`);
-        console.log(`用户2: ${user2.address}`);
+        if (signers.length > 1) {
+            console.log(`用户1: ${user1.address}`);
+            console.log(`用户2: ${user2.address}`);
+        } else {
+            console.log(`注意: 只有一个账户，将使用部署者账户进行所有测试`);
+        }
         
         // 连接合约
         const TrackerToken = await ethers.getContractFactory("TrackerToken");

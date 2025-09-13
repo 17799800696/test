@@ -147,8 +147,14 @@ func (r *BalanceChangeRepository) MarkAsProcessed(ids []uint64) error {
 // GetChangesByTimeRange 获取时间范围内的变动记录
 func (r *BalanceChangeRepository) GetChangesByTimeRange(userAddress string, chainID int64, startTime, endTime time.Time) ([]BalanceChange, error) {
 	var changes []BalanceChange
-	err := r.db.Where("user_address = ? AND chain_id = ? AND timestamp >= ? AND timestamp < ?",
-		userAddress, chainID, startTime, endTime).Order("timestamp ASC").Find(&changes).Error
+	query := r.db.Where("chain_id = ? AND timestamp >= ? AND timestamp < ?", chainID, startTime, endTime)
+
+	// 如果指定了用户地址，则添加用户地址条件
+	if userAddress != "" {
+		query = query.Where("user_address = ?", userAddress)
+	}
+
+	err := query.Order("timestamp ASC").Find(&changes).Error
 	return changes, err
 }
 

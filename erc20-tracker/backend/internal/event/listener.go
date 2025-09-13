@@ -192,11 +192,11 @@ func (el *EventListener) syncHistoricalEvents(fromBlock uint64, confirmationBloc
 	}
 }
 
-// listenRealTimeEvents 监听实时事件
+// listenRealTimeEvents 监听实时事件（使用轮询方式）
 func (el *EventListener) listenRealTimeEvents(confirmationBlocks int) {
 	logger.WithField("chain", el.chainConfig.Name).Info("开始实时事件监听")
 
-	// 创建事件查询
+	// 尝试WebSocket订阅，如果失败则使用轮询
 	query := ethereum.FilterQuery{
 		Addresses: []common.Address{el.contractAddress},
 		Topics: [][]common.Hash{
@@ -208,15 +208,19 @@ func (el *EventListener) listenRealTimeEvents(confirmationBlocks int) {
 		},
 	}
 
-	// 创建日志订阅
+	// 尝试创建日志订阅
 	logs := make(chan types.Log)
 	sub, err := el.client.SubscribeFilterLogs(el.ctx, query, logs)
 	if err != nil {
 		logger.WithField("error", err).Error("创建日志订阅失败")
+		logger.WithField("chain", el.chainConfig.Name).Info("切换到轮询模式监听事件")
+		// 使用轮询模式
+		el.pollForEvents(confirmationBlocks)
 		return
 	}
 	defer sub.Unsubscribe()
 
+	// WebSocket订阅模式
 	for {
 		select {
 		case <-el.ctx.Done():
@@ -227,6 +231,61 @@ func (el *EventListener) listenRealTimeEvents(confirmationBlocks int) {
 		case vLog := <-logs:
 			// 等待确认
 			go el.waitAndProcessLog(vLog, confirmationBlocks)
+		}
+	}
+}
+
+// pollForEvents 轮询监听事件
+func (el *EventListener) pollForEvents(confirmationBlocks int) {
+	ticker := time.NewTicker(10 * time.Second) // 每10秒轮询一次
+	defer ticker.Stop()
+
+	// 获取当前最后同步的区块号
+	lastSyncedBlock, err := el.repos.BlockSyncStatus.GetLastSyncedBlock(el.chainConfig.ChainID)
+	if err != nil {
+		logger.WithField("error", err).Error("获取最后同步区块失败")
+		return
+	}
+
+	for {
+		select {
+		case <-el.ctx.Done():
+			return
+		case <-ticker.C:
+			// 获取当前最新区块号
+			latestBlock, err := el.client.BlockNumber(el.ctx)
+			if err != nil {
+				logger.WithField("error", err).Error("获取最新区块号失败")
+				continue
+			}
+
+			// 计算确认后的区块号
+			confirmedBlock := int64(latestBlock) - int64(confirmationBlocks)
+			if confirmedBlock <= int64(lastSyncedBlock) {
+				continue
+			}
+
+			// 处理新区块的事件
+			toBlock := uint64(confirmedBlock)
+			if err := el.processBlockRange(lastSyncedBlock+1, toBlock); err != nil {
+				logger.WithFields(map[string]interface{}{
+					"error":      err,
+					"from_block": lastSyncedBlock + 1,
+					"to_block":   toBlock,
+				}).Error("轮询处理区块事件失败")
+				continue
+			}
+
+			// 更新同步状态
+			if err := el.repos.BlockSyncStatus.UpdateLastSyncedBlock(el.chainConfig.ChainID, toBlock); err != nil {
+				logger.WithField("error", err).Error("更新同步状态失败")
+			}
+
+			lastSyncedBlock = toBlock
+			logger.WithFields(map[string]interface{}{
+				"chain":      el.chainConfig.Name,
+				"last_block": lastSyncedBlock,
+			}).Debug("轮询事件监听更新")
 		}
 	}
 }
@@ -343,6 +402,20 @@ func (el *EventListener) processLog(vLog types.Log) error {
 
 // processTransferEvent 处理转账事件
 func (el *EventListener) processTransferEvent(vLog types.Log, timestamp time.Time) error {
+	// 检查交易是否已经处理过
+	txHash := vLog.TxHash.Hex()
+	exists, err := el.repos.BalanceChange.ExistsByTxHash(txHash)
+	if err != nil {
+		return fmt.Errorf("检查交易重复性失败: %w", err)
+	}
+	if exists {
+		logger.WithFields(map[string]interface{}{
+			"tx_hash": txHash,
+			"event":   "Transfer",
+		}).Debug("Transfer事件已处理，跳过重复处理")
+		return nil
+	}
+
 	// 解析事件数据
 	event := struct {
 		From  common.Address
@@ -362,20 +435,20 @@ func (el *EventListener) processTransferEvent(vLog types.Log, timestamp time.Tim
 		"from":    event.From.Hex(),
 		"to":      event.To.Hex(),
 		"value":   event.Value.String(),
-		"tx_hash": vLog.TxHash.Hex(),
+		"tx_hash": txHash,
 		"block":   vLog.BlockNumber,
 	}).Debug("处理Transfer事件")
 
 	// 处理发送方余额变动（如果不是mint）
 	if event.From != (common.Address{}) {
-		if err := el.updateUserBalance(event.From.Hex(), event.Value, database.ChangeTypeTransferOut, vLog, timestamp, false); err != nil {
+		if err := el.updateUserBalanceWithoutDuplicateCheck(event.From.Hex(), event.Value, database.ChangeTypeTransferOut, vLog, timestamp, false); err != nil {
 			return fmt.Errorf("更新发送方余额失败: %w", err)
 		}
 	}
 
 	// 处理接收方余额变动（如果不是burn）
 	if event.To != (common.Address{}) {
-		if err := el.updateUserBalance(event.To.Hex(), event.Value, database.ChangeTypeTransferIn, vLog, timestamp, true); err != nil {
+		if err := el.updateUserBalanceWithoutDuplicateCheck(event.To.Hex(), event.Value, database.ChangeTypeTransferIn, vLog, timestamp, true); err != nil {
 			return fmt.Errorf("更新接收方余额失败: %w", err)
 		}
 	}
@@ -437,6 +510,28 @@ func (el *EventListener) processBurnEvent(vLog types.Log, timestamp time.Time) e
 
 // updateUserBalance 更新用户余额
 func (el *EventListener) updateUserBalance(userAddress string, amount *big.Int, changeType string, vLog types.Log, timestamp time.Time, isIncrease bool) error {
+	// 检查交易是否已经处理过
+	txHash := vLog.TxHash.Hex()
+	exists, err := el.repos.BalanceChange.ExistsByTxHash(txHash)
+	if err != nil {
+		return fmt.Errorf("检查交易重复性失败: %w", err)
+	}
+	if exists {
+		logger.WithFields(map[string]interface{}{
+			"tx_hash": txHash,
+			"user":    userAddress,
+		}).Debug("交易已处理，跳过重复处理")
+		return nil // 交易已处理，直接返回成功
+	}
+
+	return el.updateUserBalanceWithoutDuplicateCheck(userAddress, amount, changeType, vLog, timestamp, isIncrease)
+}
+
+// updateUserBalanceWithoutDuplicateCheck 更新用户余额（不进行重复检查）
+// 用于Transfer事件中已经在上层检查过重复性的情况
+func (el *EventListener) updateUserBalanceWithoutDuplicateCheck(userAddress string, amount *big.Int, changeType string, vLog types.Log, timestamp time.Time, isIncrease bool) error {
+	txHash := vLog.TxHash.Hex()
+
 	// 获取当前余额
 	currentBalance, err := el.repos.UserBalance.GetBalance(userAddress, el.chainConfig.ChainID)
 	if err != nil {
@@ -465,7 +560,7 @@ func (el *EventListener) updateUserBalance(userAddress string, amount *big.Int, 
 	balanceChange := &database.BalanceChange{
 		UserAddress: userAddress,
 		ChainID:     el.chainConfig.ChainID,
-		TxHash:      vLog.TxHash.Hex(),
+		TxHash:      txHash,
 		BlockNumber: vLog.BlockNumber,
 		ChangeType:  changeType,
 		Timestamp:   timestamp,
@@ -483,7 +578,7 @@ func (el *EventListener) updateUserBalance(userAddress string, amount *big.Int, 
 		"amount":      amount.String(),
 		"old_balance": currentBalance.String(),
 		"new_balance": newBalance.String(),
-		"tx_hash":     vLog.TxHash.Hex(),
+		"tx_hash":     txHash,
 	}).Info("用户余额已更新")
 
 	return nil

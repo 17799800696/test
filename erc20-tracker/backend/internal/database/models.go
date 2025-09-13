@@ -12,7 +12,7 @@ type UserBalance struct {
 	ID          uint64    `gorm:"primaryKey;autoIncrement" json:"id"`
 	UserAddress string    `gorm:"type:varchar(42);not null;index:idx_user_chain,unique" json:"user_address"`
 	ChainID     int64     `gorm:"not null;index:idx_user_chain,unique" json:"chain_id"`
-	Balance     string    `gorm:"type:decimal(78,0);not null;default:0" json:"balance"` // 使用字符串存储大数
+	Balance     string    `gorm:"type:decimal(65,0);not null;default:0" json:"balance"` // 使用字符串存储大数
 	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt   time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
@@ -57,9 +57,9 @@ type BalanceChange struct {
 	ChainID       int64     `gorm:"not null;index:idx_chain" json:"chain_id"`
 	TxHash        string    `gorm:"type:varchar(66);not null;index:idx_tx_hash,unique" json:"tx_hash"`
 	BlockNumber   uint64    `gorm:"not null;index:idx_block" json:"block_number"`
-	BalanceBefore string    `gorm:"type:decimal(78,0);not null" json:"balance_before"`
-	BalanceAfter  string    `gorm:"type:decimal(78,0);not null" json:"balance_after"`
-	ChangeAmount  string    `gorm:"type:decimal(78,0);not null" json:"change_amount"`
+	BalanceBefore string    `gorm:"type:decimal(65,0);not null" json:"balance_before"`
+	BalanceAfter  string    `gorm:"type:decimal(65,0);not null" json:"balance_after"`
+	ChangeAmount  string    `gorm:"type:decimal(65,0);not null" json:"change_amount"`
 	ChangeType    string    `gorm:"type:varchar(20);not null" json:"change_type"` // mint, burn, transfer_in, transfer_out
 	Timestamp     time.Time `gorm:"not null;index:idx_user_time" json:"timestamp"`
 	Processed     bool      `gorm:"not null;default:false;index:idx_processed" json:"processed"` // 是否已处理积分计算
@@ -123,7 +123,7 @@ type PointsCalculationLog struct {
 	StartTime       time.Time `gorm:"not null" json:"start_time"`
 	EndTime         time.Time `gorm:"not null" json:"end_time"`
 	PointsEarned    float64   `gorm:"type:decimal(20,8);not null" json:"points_earned"`
-	AverageBalance  string    `gorm:"type:decimal(78,0);not null" json:"average_balance"`
+	AverageBalance  string    `gorm:"type:decimal(65,0);not null" json:"average_balance"`
 	HoldingHours    float64   `gorm:"type:decimal(10,4);not null" json:"holding_hours"`
 	CreatedAt       time.Time `gorm:"autoCreateTime" json:"created_at"`
 }

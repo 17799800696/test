@@ -94,9 +94,9 @@ func (app *Application) Start() error {
 	}
 
 	// 启动定时任务
-	if err := app.startCronJobs(); err != nil {
-		return fmt.Errorf("启动定时任务失败: %w", err)
-	}
+	//if err := app.startCronJobs(); err != nil {
+	//	return fmt.Errorf("启动定时任务失败: %w", err)
+	//}
 
 	// 检查是否需要回溯计算积分
 	if err := app.checkAndBackfillPoints(); err != nil {
@@ -104,6 +104,12 @@ func (app *Application) Start() error {
 	}
 
 	logger.Info("ERC20代币追踪系统启动完成")
+
+	// 立即执行积分计算测试
+	if err := app.testPointsCalculation(); err != nil {
+		logger.WithField("error", err).Error("积分计算测试失败，但系统继续运行")
+	}
+
 	return nil
 }
 
@@ -188,9 +194,20 @@ func (app *Application) checkAndBackfillPoints() error {
 	// 这里可以实现检查逻辑，比如检查系统配置中的最后回溯时间
 	// 如果发现有缺失的时间段，则进行回溯计算
 
-	// 示例：如果系统是第一次启动，可能需要从某个时间点开始回溯
-	// 实际实现中可以根据业务需求调整
+	return nil
+}
 
+// testPointsCalculation 测试积分计算功能
+func (app *Application) testPointsCalculation() error {
+	logger.Info("开始测试积分计算功能")
+
+	// 执行测试积分计算
+	if err := app.calculator.TestCalculatePoints(); err != nil {
+		logger.WithField("error", err).Error("积分计算测试失败")
+		return err
+	}
+
+	logger.Info("积分计算测试完成")
 	return nil
 }
 

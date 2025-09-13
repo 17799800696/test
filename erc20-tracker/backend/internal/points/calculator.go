@@ -118,7 +118,7 @@ func (pc *PointsCalculator) calculateTimeWeightedPoints(userAddress string, chai
 					"points":        points,
 					"period_start":  currentTime,
 					"period_end":    change.Timestamp,
-				}).Debug("计算时间段积分")
+				}).Info("计算时间段积分")
 			}
 		}
 
@@ -143,7 +143,7 @@ func (pc *PointsCalculator) calculateTimeWeightedPoints(userAddress string, chai
 				"points":        points,
 				"period_start":  currentTime,
 				"period_end":    endTime,
-			}).Debug("计算最后时间段积分")
+			}).Info("计算最后时间段积分")
 		}
 	}
 
@@ -265,8 +265,35 @@ func (pc *PointsCalculator) CalculateHourlyPoints() error {
 			continue
 		}
 	}
+	return nil
+}
 
-	logger.Info("每小时积分计算完成")
+// TestCalculatePoints 手动测试积分计算功能
+func (pc *PointsCalculator) TestCalculatePoints() error {
+	// 使用包含实际余额变动的时间段进行测试
+	// 数据库中的时间是本地时间，需要转换为UTC时间进行查询
+	// 本地时间 22:47:36-23:12:36 对应 UTC 时间 14:47:36-15:12:36 (UTC+8)
+	startTime := time.Date(2025, 9, 12, 14, 47, 0, 0, time.UTC)
+	endTime := time.Date(2025, 9, 12, 15, 13, 0, 0, time.UTC)
+
+	logger.WithFields(map[string]any{
+		"start_time": startTime,
+		"end_time":   endTime,
+	}).Info("开始测试积分计算")
+
+	// 为每个启用的链计算积分
+	for _, chain := range pc.config.GetEnabledChains() {
+		if err := pc.calculatePointsForChain(chain.ChainID, startTime, endTime); err != nil {
+			logger.WithFields(map[string]any{
+				"error":    err,
+				"chain_id": chain.ChainID,
+				"chain":    chain.Name,
+			}).Error("测试积分计算失败")
+			return err
+		}
+	}
+
+	logger.Info("测试积分计算完成")
 	return nil
 }
 
@@ -318,9 +345,36 @@ func (pc *PointsCalculator) calculatePointsForChain(chainID int64, startTime, en
 
 // getUsersWithChanges 获取在指定时间段内有余额变动的用户
 func (pc *PointsCalculator) getUsersWithChanges(chainID int64, startTime, endTime time.Time) ([]string, error) {
-	// 这里需要在database包中添加相应的方法
-	// 暂时返回空列表，实际实现需要查询数据库
-	return []string{}, nil
+	// 直接从balance_changes表查询有变动的用户
+	changes, err := pc.repos.BalanceChange.GetChangesByTimeRange("", chainID, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("获取余额变动记录失败: %w", err)
+	}
+
+	// 提取唯一的用户地址
+	userSet := make(map[string]bool)
+	for _, change := range changes {
+		if value, ok := userSet[change.UserAddress]; ok && value == true {
+			continue
+		}
+		userSet[change.UserAddress] = true
+	}
+
+	// 转换为切片
+	users := make([]string, 0, len(userSet))
+	for user := range userSet {
+		users = append(users, user)
+	}
+
+	logger.WithFields(map[string]any{
+		"chain_id":      chainID,
+		"start_time":    startTime,
+		"end_time":      endTime,
+		"users_found":   len(users),
+		"changes_found": len(changes),
+	}).Debug("获取有余额变动的用户")
+
+	return users, nil
 }
 
 // BackfillPoints 回溯计算积分
