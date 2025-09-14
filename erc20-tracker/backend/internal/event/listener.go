@@ -394,7 +394,6 @@ func (el *EventListener) processLog(vLog types.Log) error {
 		return fmt.Errorf("检查交易是否存在失败: %w", err)
 	}
 	if exists {
-		// 已处理过，跳过
 		return nil
 	}
 
