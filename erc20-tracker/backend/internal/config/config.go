@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -35,7 +36,6 @@ type DatabaseConfig struct {
 	Password string `json:"password"`
 	DBName   string `json:"db_name"`
 	Charset  string `json:"charset"`
-	TimeZone string `json:"timezone"`
 }
 
 // ChainConfig 区块链配置
@@ -84,7 +84,6 @@ func LoadConfig() (*Config, error) {
 			Password: getEnv("DB_PASSWORD", ""),
 			DBName:   getEnv("DB_NAME", "erc20_tracker"),
 			Charset:  getEnv("DB_CHARSET", "utf8mb4"),
-			TimeZone: getEnv("DB_TIMEZONE", "Asia/Shanghai"),
 		},
 		Chains: []ChainConfig{
 			{
@@ -173,13 +172,17 @@ func (c *Config) Validate() error {
 
 // GetDSN 获取数据库连接字符串
 func (c *Config) GetDSN() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
+	// URL编码时区字符串，因为可能包含特殊字符如斜杠
+	timezone := url.QueryEscape(c.Timezone)
+
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=%s",
 		c.Database.User,
 		c.Database.Password,
 		c.Database.Host,
 		c.Database.Port,
 		c.Database.DBName,
 		c.Database.Charset,
+		timezone,
 	)
 }
 
